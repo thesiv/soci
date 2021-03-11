@@ -125,6 +125,21 @@ private:
     int i_;
 };
 
+// user-defined object for test26 and test28
+class MyOptionalString
+{
+public:
+    MyOptionalString() : valid_(false) {}
+    MyOptionalString(const std::string& str) : valid_(true), str_(str) {}
+    void set(const std::string& str) { valid_ = true; str_ = str; }
+    void reset() { valid_ = false; str_.clear(); }
+    bool is_valid() const { return valid_; }
+    const std::string &get() const { return str_; }
+private:
+    bool valid_;
+    std::string str_;
+};
+
 namespace soci
 {
 
@@ -145,6 +160,37 @@ template<> struct type_conversion<MyInt>
     {
         i = mi.get();
         ind = i_ok;
+    }
+};
+
+// basic type conversion for string based user-defined type which can be null
+template<> struct type_conversion<MyOptionalString>
+{
+    typedef std::string base_type;
+
+    static void from_base(const base_type& in, indicator ind, MyOptionalString& out)
+    {
+        if (ind == i_null)
+        {
+            out.reset();
+        }
+        else
+        {
+            out.set(in);
+        }
+    }
+
+    static void to_base(const MyOptionalString& in, base_type& out, indicator& ind)
+    {
+        if (in.is_valid())
+        {
+            out = in.get();
+            ind = i_ok;
+        }
+        else
+        {
+            ind = i_null;
+        }
     }
 };
 
@@ -1781,6 +1827,35 @@ TEST_CASE_METHOD(common_tests, "Use vector", "[core][use][vector]")
         CHECK(v2[2] == 1);
         CHECK(v2[3] == 2000000000);
     }
+}
+
+// use vector elements with type convertion
+TEST_CASE_METHOD(common_tests, "Use vector of custom type objects", "[core][use][vector][type_conversion]")
+{
+    soci::session sql(backEndFactory_, connectString_);
+
+    auto_table_creator tableCreator(tc_.table_creator_1(sql));
+
+    std::vector<MyOptionalString> v;
+    v.push_back(MyOptionalString("string")); // The not empty valid string.
+    v.push_back(MyOptionalString());         // Not valid string (i.e. null).
+    v.push_back(MyOptionalString(""));       // The empty valid string.
+
+    sql << "insert into soci_test(str) values(:s)", use(v);
+
+    std::vector<MyOptionalString> v2(4);
+
+    sql << "select str from soci_test order by str", into(v2);
+
+    REQUIRE(v2.size() == 3);
+
+    CHECK(!v2[0].is_valid());
+
+    CHECK(v2[1].is_valid());
+    CHECK(v2[1].get().empty());
+
+    CHECK(v2[2].is_valid());
+    CHECK(v2[2].get() == "string");
 }
 
 // test for named binding
